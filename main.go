@@ -17,30 +17,28 @@ type optT struct {
 }
 
 type inT struct {
-	name  string
-	file  *os.File
-	read  *bufio.Reader
-	count int
-	rec   string
-	eof   bool
-	eod   bool
+	name   string // filename
+	count  int    // read lines
+	rec    string // current record
+	eof    bool   // current read status
+	eod    bool   // current get status
+	file   *os.File
+	reader *bufio.Reader
 }
 
 type outT struct {
-	name  string
-	file  *os.File
-	writ  *bufio.Writer
-	count int
+	name   string // filename
+	count  int    // written lines
+	file   *os.File
+	writer *bufio.Writer
 }
 
 type allT struct {
-	opts optT
-	ins  []inT  // input files
-	outs []outT // output files
+	pats  []string // all possible patterns
+	nodup bool     // ignore duplicate lines
+	ins   []inT    // input files
+	outs  []outT   // output files
 }
-
-var pats []string          // all possible patterns; init in main()
-var	filter map[string]bool // desired output files; init in main()
 
 // Flip is a helper.
 func flip(ss []string) {
@@ -59,96 +57,86 @@ func flip(ss []string) {
 func main() {
 	repFile := mustCreate("Report.txt")
 	defer repFile.Close()
-	repWrit := bufio.NewWriter(repFile)
-	defer repWrit.Flush()
-
-	filenames, opts := args() // returns at least one filename
-
-	var cmd string
-	for _, v := range os.Args {
-		cmd = cmd + v + " "
-	}
-	mustWrite(repWrit, "Command:\n\t$ "+cmd) // report
-
-	flip(filenames)           // so that position in arguments matches position in matching pattern
-
-	pats = allPats(len(filenames)) // init all possible patterns
+	repWriter := bufio.NewWriter(repFile)
+	defer repWriter.Flush()
+	reportHead(repWriter)
 
 	var all allT
 
-	// process options
-	if opts.nodup {
-		all.opts.nodup = opts.nodup
-	}
-	if len(opts.outs) > 0 {
-		all.opts.outs  = opts.outs
-	}
-	filter = make(map[string]bool, len(pats))
-	for _, v := range pats {
-		filter[v] = false
-	}
-	if len(all.opts.outs) > 0 {
-		for _, v := range all.opts.outs { // desired output
-			filter[v] = true
-		}
-	} else {
-		for _, v := range pats { // all output
-			filter[v] = true
-		}
+	filenames, opts := args()
+	flip(filenames) // so that position in arguments matches position in matching pattern
+
+	all.pats = allPats(len(filenames)) // init all possible patterns
+
+	if opts.nodup { // no duplicates
+		all.nodup = opts.nodup
 	}
 
-	// input files
-	all.ins = make([]inT, 0, len(filenames))
-	var in inT
+	all.ins = make([]inT, 0, len(filenames)) // input files
 	for _, fn := range filenames {
+		var in inT
 		in.name = fn
 		in.file = mustOpen(in.name)
 		defer in.file.Close()
-		in.read = bufio.NewReader(in.file)
 		all.ins = append(all.ins, in)
 	}
 
-	// output files
-	all.outs = make([]outT, 0, len(pats)-1) // no file for Ns only pattern
-	var out outT
-	for i, pat := range pats {
-		if i == 0 {  // no file for Ns only pattern
+	all.outs = make([]outT, 0, len(all.pats)-1) // output files (minus Ns only pattern)
+	for i, pat := range all.pats {
+		if i == 0 { // no file for Ns only pattern
 			continue
 		}
+		var out outT
 		out.name = pat
-		if filter[pat] { // desired output only
+		if len(opts.outs) > 0 {
+			for _, name := range opts.outs {
+				if pat == name { // desired output files only
+					out.file = mustCreate(out.name)
+					defer out.file.Close()
+				}
+			}
+		} else { // all possible output files
 			out.file = mustCreate(out.name)
 			defer out.file.Close()
-			out.writ = bufio.NewWriter(out.file)
-			defer out.writ.Flush()
 		}
 		all.outs = append(all.outs, out)
 	}
 
-	err := matchAll(&all) // ACTION
+	err := process(&all) // ACTION
 	if err != nil {
 		log.Fatalln(err)
 	}
 
-	mustWrite(repWrit, "\nInput files:") // report
-	for i := len(all.ins)-1; i >= 0; i-- {
-		v := all.ins[i]
-		mustWrite(repWrit, "\t" + v.name + ": " + strconv.Itoa(v.count))
-	}
-	mustWrite(repWrit, "\nOutput files:") // report
-	for _, v := range all.outs {
-		mustWrite(repWrit, "\t" + v.name + ": " + strconv.Itoa(v.count))
-	}
-	
+	reportFoot(repWriter, &all)
 
 	return
 }
 
+func reportHead(report *bufio.Writer) {
+	var cmd string
+	for _, v := range os.Args {
+		cmd = cmd + v + " "
+	}
+	mustWrite(report, "Command:\n\t$ "+cmd)
+}
+
+func reportFoot(report *bufio.Writer, all *allT) {
+	mustWrite(report, "\nInput files:")
+	for i := len(all.ins) - 1; i >= 0; i-- {
+		v := all.ins[i]
+		mustWrite(report, "\t"+v.name+": "+strconv.Itoa(v.count))
+	}
+	mustWrite(report, "\nOutput files:")
+	for _, v := range all.outs {
+		mustWrite(report, "\t"+v.name+": "+strconv.Itoa(v.count))
+	}
+}
+
 // AllPats returns all possible Y/N patterns with length len.
-// Indices of slice pats correspond to the contained patterns, 
+// Indices of slice pats correspond to the contained patterns,
 // i.e. you get the Index if you replace all N with 0 and all Y with 1
 // and read the result as as binary number.
-// 
+//
 // Example: for len 2 allPats return pats = {"NN" "NY" "YN" "YY"}.
 func allPats(len int) (pats []string) {
 	if len == 0 { // no pattern
@@ -172,11 +160,32 @@ func allPats(len int) (pats []string) {
 	return pats
 }
 
+// Process creates bufio readers and writers and calls matchAll for action.
+func process(all *allT) (err error) {
+	for i, in := range all.ins {
+		all.ins[i].reader = bufio.NewReader(in.file)
+	}
+
+	for i, out := range all.outs {
+		if out.file != nil { // desired output files only
+			all.outs[i].writer = bufio.NewWriter(out.file)
+			defer all.outs[i].writer.Flush()
+		}
+	}
+
+	err = matchAll(all) // ACTION
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	return err
+}
+
 // MatchAll reads all input in a read loop and writes to the output files.
 func matchAll(all *allT) (err error) {
 
-	for pos, _ := range all.ins { // initial readings
-		err = get(pos, all)
+	for i, _ := range all.ins { // initial readings
+		err = get(i, all)
 		if err != nil {
 			return err
 		}
@@ -184,17 +193,17 @@ func matchAll(all *allT) (err error) {
 	curPatInx, inInxs := compare(all)
 
 	for curPatInx != 0 {
-		for patInx := range pats {
+		for patInx := range all.pats {
 			if curPatInx == patInx { // MATCH
 
-				if filter[pats[patInx]] { // desired output only
+				if all.outs[patInx-1].writer != nil { // desired output files only
 					// [patInx-1], because pattern with Ns only makes no output file
-					mustWrite(all.outs[patInx-1].writ, all.ins[inInxs[0]].rec)
+					mustWrite(all.outs[patInx-1].writer, all.ins[inInxs[0]].rec)
 					all.outs[patInx-1].count += 1
 				}
 
-				for _, pos := range inInxs { // read next
-					err = get(pos, all)
+				for _, i := range inInxs { // read input files where lines were processed
+					err = get(i, all)
 					if err != nil {
 						return err
 					}
@@ -210,22 +219,22 @@ func matchAll(all *allT) (err error) {
 
 // Compare compares all input lines currently in focus,
 // returns the pattern index for the minimum line and all indices
-// that lead to the input files containing this minimum line.
+// that lead to the input files whose current lines are to be processed.
 func compare(all *allT) (curPatInx int, inInxs []int) {
 	if allEOD(all) {
 		return 0, nil
 	}
 
 	var recs = make([]string, 0, len(all.ins))
-	for pos := range all.ins {
-		recs = append(recs, all.ins[pos].rec)
+	for i := range all.ins {
+		recs = append(recs, all.ins[i].rec)
 	}
 	minRec := min(recs...)
 
-	for pos := range all.ins {
-		if all.ins[pos].rec == minRec {
-			curPatInx |= (1 << pos)      // für Mustervergleich
-			inInxs = append(inInxs, pos) // am Muster Beteiligte
+	for i := range all.ins {
+		if all.ins[i].rec == minRec {
+			curPatInx |= (1 << i)      // für Mustervergleich
+			inInxs = append(inInxs, i) // am Muster Beteiligte
 		}
 	}
 
@@ -233,8 +242,8 @@ func compare(all *allT) (curPatInx int, inInxs []int) {
 }
 
 func allEOD(all *allT) bool {
-	for pos := range all.ins {
-		if !all.ins[pos].eod {
+	for i := range all.ins {
+		if !all.ins[i].eod {
 			return false
 		}
 	}
@@ -251,52 +260,52 @@ func min(ss ...string) (s string) {
 	return s
 }
 
-// Get reads the next line from all.ins[pos].read and feeds the
-// variables all.ins[pos].eof/eod/rec.
+// Get reads the next line from all.ins[i].reader and feeds the
+// variables all.ins[i].eof/eod/rec.
 // With option -nodup it ignores duplicate lines, and empty ones too.
 // If an error occurs get stops working and returns an error value.
-func get(pos int, all *allT) error {
-	if all.ins[pos].eof { // earlier: EOF + data
-		all.ins[pos].eod = true
-		all.ins[pos].rec = string(byte(0xFF))
+func get(i int, all *allT) error {
+	if all.ins[i].eof { // earlier: EOF + data
+		all.ins[i].eod = true
+		all.ins[i].rec = string(byte(0xFF))
 		return nil
 	}
 
 readagain:
-	rec, err := all.ins[pos].read.ReadString('\n')
+	rec, err := all.ins[i].reader.ReadString('\n')
 
 	if err != nil && err != io.EOF { // serious read error
-		log.Fatalln(all.ins[pos].name+": read error after line:", all.ins[pos].rec, "\n\t", err)
+		log.Fatalln(all.ins[i].name+": read error after line:", all.ins[i].rec, "\n\t", err)
 	}
 
 	if err == io.EOF && len(rec) == 0 { // EOF + no data
-		all.ins[pos].eof = true
-		all.ins[pos].eod = true
-		all.ins[pos].rec = string(byte(0xFF))
+		all.ins[i].eof = true
+		all.ins[i].eod = true
+		all.ins[i].rec = string(byte(0xFF))
 		return nil
 	}
 
 	if err == io.EOF && len(rec) > 0 { // EOF + data
-		all.ins[pos].eof = true
+		all.ins[i].eof = true
 	}
 
 	if rec[len(rec)-1] == '\n' {
 		rec = rec[:len(rec)-1] // data without delimiter
 	}
 
-	all.ins[pos].count += 1
+	all.ins[i].count += 1
 
 	// -nodup ignores duplicate lines (and empty ones)
-	if all.opts.nodup && rec == all.ins[pos].rec {
+	if all.nodup && rec == all.ins[i].rec {
 		goto readagain
 	}
 
 	// lines must be ordered ascendingly (compare with previous line)
-	if rec < all.ins[pos].rec {
-		return errors.New(all.ins[pos].name + ": wrong sequence near:\n" + all.ins[pos].rec)
+	if rec < all.ins[i].rec {
+		return errors.New(all.ins[i].name + ": wrong sequence near:\n" + all.ins[i].rec)
 	}
 
-	all.ins[pos].rec = rec
+	all.ins[i].rec = rec
 
 	return nil
 }
