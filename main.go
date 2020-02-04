@@ -242,6 +242,9 @@ func compare(all *allT) (curPatInx int, inInxs []int) {
 }
 
 func allEOD(all *allT) bool {
+	if all == nil {
+		return true
+	}
 	for i := range all.ins {
 		if !all.ins[i].eod {
 			return false
@@ -251,6 +254,9 @@ func allEOD(all *allT) bool {
 }
 
 func min(ss ...string) (s string) {
+	if len(ss) == 0 {
+		return ""
+	}
 	s = ss[0]
 	for _, val := range ss {
 		if val < s {

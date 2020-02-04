@@ -10,7 +10,7 @@ import (
 
 func usage() {
 	fmt.Println("Compare files as line sets and write matching lines to 'intersection files'. Input files must be sorted in ascending order. Output files are named by the corresponding matching pattern (e.g.: YN - lines only found in first input file; YY - lines found in both input files).")
-	fmt.Println("\nusage:", pgmname, "[OPTIONS] FILENAME...\n")
+	fmt.Println("\nusage:", pgmname, "[OPTIONS] FILENAME...\n ")
 	flag.PrintDefaults()
 }
 
