@@ -3,6 +3,8 @@
 package main
 
 import (
+	"bytes"
+	"strconv"
 	"testing"
 )
 
@@ -104,5 +106,145 @@ func TestAllEOD(t *testing.T) {
 		if out != v.want {
 			t.Error(fncname, "wanted:", v.want, "got:", out)
 		}
+	}
+}
+
+func TestCompare(t *testing.T) {
+	fncname := "TestCompare"
+	tests := []struct {
+		in   *allT
+		patInx int
+		inInxs []int
+	}{
+		{nil, 0, nil},
+		{&allT{}, 0, nil},
+		{&allT{ins: []inT{inT{eod: true}}}, 0, nil},
+		{&allT{ins: []inT{inT{rec: "A"}}}, 1, []int{0}}, // pattern 1: Y
+		{&allT{ins: []inT{inT{rec: "A"}, inT{rec: "B"}}}, 1, []int{0}}, // pattern 1: NY
+		{&allT{ins: []inT{inT{rec: "B"}, inT{rec: "A"}}}, 2, []int{1}}, // pattern 2: YN
+		{&allT{ins: []inT{inT{rec: "A"}, inT{rec: "A"}}}, 3, []int{0, 1}}, // pattern 3: YY
+		{&allT{ins: []inT{inT{rec: "A"}, inT{rec: "A"}, inT{rec: "B"}}}, 3, []int{0, 1}}, // pattern 3: NYY
+		{&allT{ins: []inT{inT{rec: "B"}, inT{rec: "A"}, inT{rec: "A"}}}, 6, []int{1, 2}}, // pattern 6: YYN
+	}
+	for _, v := range tests {
+		pi, is := compare(v.in)
+		if pi != v.patInx {
+			t.Error(fncname, "wanted:", v.patInx, v.inInxs, "got:", pi, is)
+		} else if is == nil {
+			if v.inInxs != nil {
+				t.Error(fncname, "wanted:", v.patInx, v.inInxs, "got:", pi, is)
+			} else {
+				for i, inx := range is {
+					if inx != v.inInxs[i] {
+						t.Error(fncname, "wanted:", v.patInx, v.inInxs, "got:", pi, is)
+					}
+				}
+			}
+		}
+	}
+}
+
+// Vorbereiten entsprechend main:
+// - var all
+// - für all.ins: jeweils bytes.NewBufferString
+// - allPats(len(all.ins))
+// - für all.outs: jeweils bytes.NewBufferString
+// - range tests
+// - - process
+func TestProcess(t *testing.T) {
+	fncname := "TestProcess"
+	tests := []struct {
+		ins  []string
+		outs []string
+	}{
+		{
+			[]string{ // 1 Eingabe
+`a
+aa
+aaa
+`,
+			},
+			[]string{ // 1 Ausgabe erwartet
+`a
+aa
+aaa
+`, // Y
+			},
+		},
+		{
+			[]string{ // 3 Eingaben
+`a
+ab
+abc
+ac
+`, // erste
+`ab
+abc
+b
+bc
+`, // zweite
+`abc
+ac
+bc
+c
+cc
+`, // dritte
+			},
+			[]string{ // 7 Ausgaben erwartet
+`a
+`, // NNY
+`b
+`, // NYN
+`ab
+`, // NYY
+`c
+cc
+`, // YNN
+`ac
+`, // YNY
+`bc
+`, // YYN
+`abc
+`, // YYY
+			},
+		},
+	}
+	for _, v := range tests {
+		var all allT
+
+		all.ins = make([]inT, 0, len(v.ins))
+		for i := 0; i < len(v.ins); i++ {
+			var in inT
+			in.name = strconv.Itoa(i)
+			buf := bytes.NewBufferString(v.ins[i])
+			in.ioreader = buf
+			all.ins = append(all.ins, in)
+		}
+
+		all.pats = allPats(len(v.ins))
+
+		all.outs = make([]outT, 0, len(all.pats)-1)
+		for i, pat := range all.pats {
+			if i == 0 { // no file for Ns only pattern
+				continue
+			}
+			var out outT
+			out.name = pat
+			buf := bytes.NewBuffer([]byte{})
+			out.iowriter = buf
+			all.outs = append(all.outs, out)
+		}
+
+		err := process(&all)
+		if err != nil {
+			t.Fatal(fncname+":", err)
+		}
+
+		for i, out := range all.outs {
+			if out.iowriter.(*bytes.Buffer).String() != v.outs[i] {
+				t.Error(fncname, "wanted:", v.outs[i], "got:", out.iowriter.(*bytes.Buffer).String())
+			}
+		}
+		
 	}
 }

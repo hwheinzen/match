@@ -17,20 +17,22 @@ type optT struct {
 }
 
 type inT struct {
-	name   string // filename
-	count  int    // read lines
-	rec    string // current record
-	eof    bool   // current read status
-	eod    bool   // current get status
-	file   *os.File
-	reader *bufio.Reader
+	name      string // filename
+	count     int    // read lines
+	rec       string // current record
+	eof       bool   // current read status
+	eod       bool   // current get status
+	file      *os.File
+	ioreader  io.Reader
+	bufreader *bufio.Reader
 }
 
 type outT struct {
-	name   string // filename
-	count  int    // written lines
-	file   *os.File
-	writer *bufio.Writer
+	name      string // filename
+	count     int    // written lines
+	file      *os.File
+	iowriter  io.Writer
+	bufwriter *bufio.Writer
 }
 
 type allT struct {
@@ -78,10 +80,11 @@ func main() {
 		in.name = fn
 		in.file = mustOpen(in.name)
 		defer in.file.Close()
+		in.ioreader = in.file
 		all.ins = append(all.ins, in)
 	}
 
-	all.outs = make([]outT, 0, len(all.pats)-1) // output files (minus Ns only pattern)
+	all.outs = make([]outT, 0, len(all.pats)-1) // outputs (minus Ns only pattern)
 	for i, pat := range all.pats {
 		if i == 0 { // no file for Ns only pattern
 			continue
@@ -90,14 +93,16 @@ func main() {
 		out.name = pat
 		if len(opts.outs) > 0 {
 			for _, name := range opts.outs {
-				if pat == name { // desired output files only
+				if pat == name { // desired outputs only
 					out.file = mustCreate(out.name)
 					defer out.file.Close()
+					out.iowriter = out.file
 				}
 			}
-		} else { // all possible output files
+		} else { // all possible outputs
 			out.file = mustCreate(out.name)
 			defer out.file.Close()
+			out.iowriter = out.file
 		}
 		all.outs = append(all.outs, out)
 	}
@@ -163,13 +168,13 @@ func allPats(len int) (pats []string) {
 // Process creates bufio readers and writers and calls matchAll for action.
 func process(all *allT) (err error) {
 	for i, in := range all.ins {
-		all.ins[i].reader = bufio.NewReader(in.file)
+		all.ins[i].bufreader = bufio.NewReader(in.ioreader)
 	}
 
 	for i, out := range all.outs {
-		if out.file != nil { // desired output files only
-			all.outs[i].writer = bufio.NewWriter(out.file)
-			defer all.outs[i].writer.Flush()
+		if out.iowriter != nil { // desired outputs only
+			all.outs[i].bufwriter = bufio.NewWriter(out.iowriter)
+			defer all.outs[i].bufwriter.Flush()
 		}
 	}
 
@@ -195,14 +200,13 @@ func matchAll(all *allT) (err error) {
 	for curPatInx != 0 {
 		for patInx := range all.pats {
 			if curPatInx == patInx { // MATCH
-
-				if all.outs[patInx-1].writer != nil { // desired output files only
+				if all.outs[patInx-1].bufwriter != nil { // desired outputs only
 					// [patInx-1], because pattern with Ns only makes no output file
-					mustWrite(all.outs[patInx-1].writer, all.ins[inInxs[0]].rec)
+					mustWrite(all.outs[patInx-1].bufwriter, all.ins[inInxs[0]].rec)
 					all.outs[patInx-1].count += 1
 				}
 
-				for _, i := range inInxs { // read input files where lines were processed
+				for _, i := range inInxs { // read input where lines were processed
 					err = get(i, all)
 					if err != nil {
 						return err
@@ -266,7 +270,7 @@ func min(ss ...string) (s string) {
 	return s
 }
 
-// Get reads the next line from all.ins[i].reader and feeds the
+// Get reads the next line from all.ins[i].bufreader and feeds the
 // variables all.ins[i].eof/eod/rec.
 // With option -nodup it ignores duplicate lines, and empty ones too.
 // If an error occurs get stops working and returns an error value.
@@ -278,7 +282,7 @@ func get(i int, all *allT) error {
 	}
 
 readagain:
-	rec, err := all.ins[i].reader.ReadString('\n')
+	rec, err := all.ins[i].bufreader.ReadString('\n')
 
 	if err != nil && err != io.EOF { // serious read error
 		log.Fatalln(all.ins[i].name+": read error after line:", all.ins[i].rec, "\n\t", err)

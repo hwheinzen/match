@@ -20,5 +20,5 @@ Provided you have Go installed, run:
 `$ match -help`
 
 
-## TODO (maybe)
-- tests
+## Bugs
+`match` seems to be pretty stable.
