@@ -3,10 +3,12 @@ package main
 import (
 	"bufio"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"os"
 	"strconv"
+	//"text/tabwriter"
 )
 
 const pgmname = "match"
@@ -61,6 +63,7 @@ func main() {
 	defer repFile.Close()
 	repWriter := bufio.NewWriter(repFile)
 	defer repWriter.Flush()
+
 	reportHead(repWriter)
 
 	var all allT
@@ -91,9 +94,9 @@ func main() {
 		}
 		var out outT
 		out.name = pat
-		if len(opts.outs) > 0 {
+		if len(opts.outs) > 0 { // desired outputs only
 			for _, name := range opts.outs {
-				if pat == name { // desired outputs only
+				if pat == name {
 					out.file = mustCreate(out.name)
 					defer out.file.Close()
 					out.iowriter = out.file
@@ -126,12 +129,17 @@ func reportHead(report *bufio.Writer) {
 }
 
 func reportFoot(report *bufio.Writer, all *allT) {
+	var num, nums string
 	mustWrite(report, "\nInput files:")
-	for i := len(all.ins) - 1; i >= 0; i-- {
+	for i, j := len(all.ins)-1, 1; i >= 0; i-- {
 		v := all.ins[i]
-		mustWrite(report, "\t"+v.name+": "+strconv.Itoa(v.count))
+		num = fmt.Sprintf("%d", j)
+		mustWrite(report, "\t"+num+" "+v.name+": "+strconv.Itoa(v.count))
+		nums += num[len(num)-1:] // last digit only
+		j++
 	}
 	mustWrite(report, "\nOutput files:")
+	mustWrite(report, "\t"+nums)
 	for _, v := range all.outs {
 		mustWrite(report, "\t"+v.name+": "+strconv.Itoa(v.count))
 	}

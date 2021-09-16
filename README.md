@@ -3,9 +3,9 @@ Command that compares arbitrary many files line by line
 
 
 ## Overview
-The command `match` compares arbitrary many input files line by line and creates output files for the possible matching patterns. 
+The command `match` compares arbitraryly many input files line by line and creates output files for the possible matching patterns. ("Arbitraryly many" is in fact limited - you'll hit the operating system limit for open files pretty soon.)
 
-Input files must be sorted in ascendng order, the key for matching is the line without the newline character. 
+Input files must be sorted in ascending order, matching key is the line.
 
 Matching patterns form the output file names, e.g. for matching two files the output file named `YN` contains the lines only found in the first input file, `NY` contains the lines found in the second input file, and `YY` contains the lines found in both files. 
 
@@ -13,7 +13,9 @@ Matching patterns form the output file names, e.g. for matching two files the ou
 ## Download
 Provided you have Go installed, run:
 
-`$ go get github.com/hwheinzen/match`
+`$ go install github.com/hwheinzen/match@latest`
+
+(Has been `$ go get github.com/hwheinzen/match` before.)
 
 
 ## Help
@@ -21,4 +23,4 @@ Provided you have Go installed, run:
 
 
 ## Bugs
-`match` seems to be pretty stable.
+`match` seems to be stable.
